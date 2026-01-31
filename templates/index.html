@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Price Tracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <h1 class="logo">🪙 CryptoTracker</h1>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                {% if session.get('username') %}
+                    <a href="/dashboard">Dashboard</a>
+                    <a href="/historical">Historical Data</a>
+                    <a href="/logout">Logout</a>
+                {% else %}
+                    <a href="/login">Login</a>
+                    <a href="/register">Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <section class="hero">
+            <h2>Real-Time Cryptocurrency Prices</h2>
+            <p>Track your favorite cryptocurrencies in real-time</p>
+            {% if session.get('username') %}
+                <p style="margin-top: 15px;">Welcome back, <strong>{{ session.get('username') }}</strong>! 👋</p>
+            {% endif %}
+        </section>
+
+        <div class="crypto-grid" id="cryptoGrid">
+            <!-- Crypto cards will be inserted here by JavaScript -->
+            <div class="loading">Loading prices...</div>
+        </div>
+    </div>
+
+    <script>
+        // Store previous prices for comparison
+        let previousPrices = {};
+
+        // Fetch and display crypto prices
+        async function fetchPrices() {
+            try {
+                const response = await fetch('/api/prices');
+                const data = await response.json();
+                displayPrices(data);
+            } catch (error) {
+                console.error('Error fetching prices:', error);
+                document.getElementById('cryptoGrid').innerHTML = '<p class="error">Error loading prices. Please try again.</p>';
+            }
+        }
+
+        function displayPrices(data) {
+            const grid = document.getElementById('cryptoGrid');
+            
+            const cryptoNames = {
+                'bitcoin': 'Bitcoin (BTC)',
+                'ethereum': 'Ethereum (ETH)',
+                'cardano': 'Cardano (ADA)',
+                'solana': 'Solana (SOL)',
+                'dogecoin': 'Dogecoin (DOGE)'
+            };
+
+            const cryptoIcons = {
+                'bitcoin': '₿',
+                'ethereum': 'Ξ',
+                'cardano': '₳',
+                'solana': '◎',
+                'dogecoin': 'Ð'
+            };
+
+            // If grid is empty, create initial cards
+            if (grid.children.length === 0 || grid.querySelector('.loading')) {
+                grid.innerHTML = '';
+                for (const [crypto, info] of Object.entries(data)) {
+                    const change24h = info.usd_24h_change || 0;
+                    const changeClass = change24h >= 0 ? 'positive' : 'negative';
+                    const changeSymbol = change24h >= 0 ? '▲' : '▼';
+
+                    const card = document.createElement('div');
+                    card.className = 'crypto-card';
+                    card.id = `card-${crypto}`;
+                    card.innerHTML = `
+                        <div class="crypto-icon">${cryptoIcons[crypto] || '🪙'}</div>
+                        <h3>${cryptoNames[crypto] || crypto}</h3>
+                        <div class="price" data-crypto="${crypto}">${info.usd.toLocaleString()}</div>
+                        <div class="change ${changeClass}">
+                            ${changeSymbol} ${Math.abs(change24h).toFixed(2)}%
+                        </div>
+                        <div class="market-cap">
+                            Market Cap: ${(info.usd_market_cap / 1e9).toFixed(2)}B
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                    previousPrices[crypto] = info.usd;
+                }
+            } else {
+                // Update existing cards with animation
+                for (const [crypto, info] of Object.entries(data)) {
+                    const priceElement = document.querySelector(`.price[data-crypto="${crypto}"]`);
+                    const card = document.getElementById(`card-${crypto}`);
+                    
+                    if (priceElement && previousPrices[crypto] !== undefined) {
+                        const oldPrice = previousPrices[crypto];
+                        const newPrice = info.usd;
+                        
+                        if (oldPrice !== newPrice) {
+                            // Add flash animation
+                            const flashClass = newPrice > oldPrice ? 'price-up' : 'price-down';
+                            card.classList.add(flashClass);
+                            
+                            // Update price with animation
+                            priceElement.textContent = `${newPrice.toLocaleString()}`;
+                            
+                            // Remove animation class after animation completes
+                            setTimeout(() => {
+                                card.classList.remove(flashClass);
+                            }, 1000);
+                        }
+                        
+                        previousPrices[crypto] = newPrice;
+                    }
+                }
+            }
+        }
+
+        // Auto-refresh prices every 15 seconds for faster updates
+        fetchPrices();
+        setInterval(fetchPrices, 15000);
+    </script>
+</body>
+</html>

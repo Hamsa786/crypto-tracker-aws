@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Historical Data - CryptoTracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <h1 class="logo">🪙 CryptoTracker</h1>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                {% if session.get('username') %}
+                    <a href="/dashboard">Dashboard</a>
+                    <a href="/historical">Historical Data</a>
+                    <a href="/logout">Logout</a>
+                {% else %}
+                    <a href="/login">Login</a>
+                    <a href="/register">Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="historical-header">
+            <h2>📊 Historical Price Trends</h2>
+            <p>Analyze cryptocurrency price movements over time</p>
+        </div>
+
+        <div class="chart-controls">
+            <div class="control-group">
+                <label for="cryptoSelector">Select Cryptocurrency:</label>
+                <select id="cryptoSelector" onchange="loadHistoricalData()">
+                    <option value="bitcoin">Bitcoin (BTC)</option>
+                    <option value="ethereum">Ethereum (ETH)</option>
+                    <option value="cardano">Cardano (ADA)</option>
+                    <option value="solana">Solana (SOL)</option>
+                    <option value="dogecoin">Dogecoin (DOGE)</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="timeRange">Time Range:</label>
+                <select id="timeRange" onchange="loadHistoricalData()">
+                    <option value="1">Last 24 Hours</option>
+                    <option value="7" selected>Last 7 Days</option>
+                    <option value="30">Last 30 Days</option>
+                    <option value="90">Last 90 Days</option>
+                    <option value="365">Last Year</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="priceChart"></canvas>
+        </div>
+
+        <div class="stats-grid" id="statsGrid">
+            <!-- Stats will be populated here -->
+        </div>
+    </div>
+
+    <script>
+        let priceChart = null;
+
+        async function loadHistoricalData() {
+            const crypto = document.getElementById('cryptoSelector').value;
+            const days = document.getElementById('timeRange').value;
+
+            try {
+                const response = await fetch(`/api/historical?crypto=${crypto}&days=${days}`);
+                const data = await response.json();
+                
+                if (data.prices && data.prices.length > 0) {
+                    displayChart(data, crypto);
+                    displayStats(data, crypto);
+                } else {
+                    console.error('No data received');
+                }
+            } catch (error) {
+                console.error('Error loading historical data:', error);
+            }
+        }
+
+        function displayChart(data, crypto) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            
+            // Extract timestamps and prices
+            const labels = data.prices.map(point => {
+                const date = new Date(point[0]);
+                return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            });
+            
+            const prices = data.prices.map(point => point[1]);
+
+            // Destroy existing chart if it exists
+            if (priceChart) {
+                priceChart.destroy();
+            }
+
+            // Create new chart
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${crypto.toUpperCase()} Price (USD)`,
+                        data: prices,
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    return '$' + context.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 45,
+                                maxTicksLimit: 10
+                            }
+                        },
+                        y: {
+                            display: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            });
+        }
+
+        function displayStats(data, crypto) {
+            const prices = data.prices.map(point => point[1]);
+            
+            const currentPrice = prices[prices.length - 1];
+            const startPrice = prices[0];
+            const highPrice = Math.max(...prices);
+            const lowPrice = Math.min(...prices);
+            const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+            const priceChange = currentPrice - startPrice;
+            const priceChangePercent = ((priceChange / startPrice) * 100).toFixed(2);
+
+            const statsGrid = document.getElementById('statsGrid');
+            statsGrid.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-label">Current Price</div>
+                    <div class="stat-value">$${currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Price Change</div>
+                    <div class="stat-value ${priceChange >= 0 ? 'positive' : 'negative'}">
+                        ${priceChange >= 0 ? '+' : ''}$${priceChange.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        (${priceChangePercent}%)
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Highest Price</div>
+                    <div class="stat-value">$${highPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Lowest Price</div>
+                    <div class="stat-value">$${lowPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Average Price</div>
+                    <div class="stat-value">$${avgPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Volatility</div>
+                    <div class="stat-value">${((highPrice - lowPrice) / avgPrice * 100).toFixed(2)}%</div>
+                </div>
+            `;
+        }
+
+        // Load default data on page load
+        loadHistoricalData();
+    </script>
+</body>
+</html>
