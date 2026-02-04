@@ -219,7 +219,7 @@ def send_alert_notification(username, message):
         if user and 'email' in user:
             # In production, you would create SNS topic and subscribe user's email
             print(f"Alert for {username}: {message}")
-            # sns.publish(TopicArn='your-topic-arn', Message=message)
+            sns.publish(TopicArn='arn:aws:sns:us-east-1:881490086317:CryptoTrackerAlerts', Message=message, Subject='Crypto Price Alert')
         return True
     except Exception as e:
         print(f"Error sending notification: {e}")
