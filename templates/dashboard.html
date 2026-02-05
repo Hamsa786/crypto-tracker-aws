@@ -51,12 +51,15 @@
                 <h3>Price Alerts</h3>
                 <div class="alert-form">
                     <select id="alertCrypto">
-                        <option value="">Select Cryptocurrency</option>
-                        <option value="bitcoin">Bitcoin (BTC)</option>
-                        <option value="ethereum">Ethereum (ETH)</option>
-                        <option value="cardano">Cardano (ADA)</option>
-                        <option value="solana">Solana (SOL)</option>
-                        <option value="dogecoin">Dogecoin (DOGE)</option>
+                      <option value="">Select Cryptocurrency</option>
+                      <option value="bitcoin">Bitcoin (BTC)</option>
+                      <option value="ethereum">Ethereum (ETH)</option>
+                      <option value="cardano">Cardano (ADA)</option>
+                      <option value="solana">Solana (SOL)</option>
+                      <option value="dogecoin">Dogecoin (DOGE)</option>
+                      <option value="ripple">Ripple (XRP)</option>
+                      <option value="polkadot">Polkadot (DOT)</option>
+                      <option value="binancecoin">Binance Coin (BNB)</option>
                     </select>
                     <select id="alertCondition">
                         <option value="above">Goes Above</option>
@@ -81,17 +84,58 @@
     </div>
 
     <script>
-        // Add cryptocurrency to watchlist
+        const cryptoNames = {
+            'bitcoin': 'Bitcoin (BTC)',
+            'ethereum': 'Ethereum (ETH)',
+            'cardano': 'Cardano (ADA)',
+            'solana': 'Solana (SOL)',
+            'dogecoin': 'Dogecoin (DOGE)',
+            'ripple': 'Ripple (XRP)',
+            'polkadot': 'Polkadot (DOT)',
+            'binancecoin': 'Binance Coin (BNB)'
+        };
+
+        const cryptoIcons = {
+            'bitcoin': '₿',
+            'ethereum': 'Ξ',
+            'cardano': '₳',
+            'solana': '◎',
+            'dogecoin': 'Ð',
+            'ripple': 'X',
+            'polkadot': '●',
+            'binancecoin': 'B'
+        };
+
+        let previousWatchlistPrices = {};
+
+        // Add cryptocurrency to watchlist with immediate display
         async function addToWatchlist() {
             const select = document.getElementById('cryptoSelect');
             const cryptoId = select.value;
             const messageDiv = document.getElementById('addMessage');
+            const button = event.target;
 
             if (!cryptoId) {
                 messageDiv.className = 'message error';
                 messageDiv.textContent = 'Please select a cryptocurrency';
                 return;
             }
+
+            // Check if already in watchlist UI
+            if (document.getElementById(`watchlist-card-${cryptoId}`)) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Already in watchlist';
+                setTimeout(() => {
+                    messageDiv.textContent = '';
+                    messageDiv.className = 'message';
+                }, 3000);
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = 'Adding...';
+            messageDiv.className = 'message';
+            messageDiv.textContent = 'Adding to watchlist...';
 
             try {
                 const response = await fetch('/api/watchlist/add', {
@@ -106,26 +150,135 @@
                 
                 if (data.success) {
                     messageDiv.className = 'message success';
-                    messageDiv.textContent = data.message;
+                    messageDiv.textContent = '✓ Added successfully!';
                     select.value = '';
+                    
+                    // Immediately create the card
+                    const grid = document.getElementById('watchlistGrid');
+                    const emptyState = grid.querySelector('.empty-state');
+                    if (emptyState) {
+                        emptyState.remove();
+                    }
+                    
+                    // Create card with the data from response
+                    if (data.crypto_data && data.crypto_data[cryptoId]) {
+                        createCryptoCard(cryptoId, data.crypto_data[cryptoId], grid);
+                    }
+                    
+                    // Refresh after 2 seconds to update prices
+                    setTimeout(() => loadWatchlist(), 2000);
+                    
                     setTimeout(() => {
                         messageDiv.textContent = '';
-                        loadWatchlist();
+                        messageDiv.className = 'message';
                     }, 2000);
                 } else {
                     messageDiv.className = 'message error';
                     messageDiv.textContent = data.message;
+                    setTimeout(() => {
+                        messageDiv.textContent = '';
+                        messageDiv.className = 'message';
+                    }, 3000);
                 }
             } catch (error) {
+                console.error('Error adding to watchlist:', error);
                 messageDiv.className = 'message error';
                 messageDiv.textContent = 'Error adding to watchlist';
+                setTimeout(() => {
+                    messageDiv.textContent = '';
+                    messageDiv.className = 'message';
+                }, 3000);
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Add to Watchlist';
             }
+        }
+
+        // Helper function to create a crypto card
+        function createCryptoCard(crypto, info, grid) {
+            // Double check card doesn't already exist
+            if (document.getElementById(`watchlist-card-${crypto}`)) {
+                console.log(`Card for ${crypto} already exists, skipping creation`);
+                return;
+            }
+
+            const change24h = info.usd_24h_change || 0;
+            const changeClass = change24h >= 0 ? 'positive' : 'negative';
+            const changeSymbol = change24h >= 0 ? '▲' : '▼';
+
+            const card = document.createElement('div');
+            card.className = 'crypto-card';
+            card.id = `watchlist-card-${crypto}`;
+            card.innerHTML = `
+                <button class="remove-btn" onclick="removeFromWatchlist('${crypto}')" title="Remove from watchlist">×</button>
+                <div class="crypto-icon">${cryptoIcons[crypto] || '🪙'}</div>
+                <h3>${cryptoNames[crypto] || crypto}</h3>
+                <div class="price" data-crypto="${crypto}">$${info.usd.toLocaleString()}</div>
+                <div class="change ${changeClass}">
+                    ${changeSymbol} ${Math.abs(change24h).toFixed(2)}%
+                </div>
+                <div class="market-cap">
+                    Market Cap: $${(info.usd_market_cap / 1e9).toFixed(2)}B
+                </div>
+            `;
+            grid.appendChild(card);
+            previousWatchlistPrices[crypto] = info.usd;
+            console.log(`✅ Created card for ${crypto} with name: ${cryptoNames[crypto]}`);
+        }
+
+        // Helper function to update an existing card
+        function updateCryptoCard(crypto, info) {
+            const card = document.getElementById(`watchlist-card-${crypto}`);
+            if (!card) {
+                console.log(`Card for ${crypto} doesn't exist, will create it`);
+                return false;
+            }
+
+            const change24h = info.usd_24h_change || 0;
+            const changeClass = change24h >= 0 ? 'positive' : 'negative';
+            const changeSymbol = change24h >= 0 ? '▲' : '▼';
+
+            const priceElement = card.querySelector('.price');
+            const changeElement = card.querySelector('.change');
+            const marketCapElement = card.querySelector('.market-cap');
+            
+            if (priceElement) {
+                const oldPrice = previousWatchlistPrices[crypto];
+                const newPrice = info.usd;
+                
+                if (oldPrice && oldPrice !== newPrice) {
+                    const flashClass = newPrice > oldPrice ? 'price-up' : 'price-down';
+                    card.classList.add(flashClass);
+                    setTimeout(() => card.classList.remove(flashClass), 1000);
+                }
+                
+                priceElement.textContent = `$${newPrice.toLocaleString()}`;
+            }
+            
+            if (changeElement) {
+                changeElement.className = `change ${changeClass}`;
+                changeElement.textContent = `${changeSymbol} ${Math.abs(change24h).toFixed(2)}%`;
+            }
+            
+            if (marketCapElement) {
+                marketCapElement.textContent = `Market Cap: $${(info.usd_market_cap / 1e9).toFixed(2)}B`;
+            }
+            
+            previousWatchlistPrices[crypto] = info.usd;
+            console.log(`✅ Updated card for ${crypto}`);
+            return true;
         }
 
         // Remove cryptocurrency from watchlist
         async function removeFromWatchlist(cryptoId) {
             if (!confirm('Remove this cryptocurrency from your watchlist?')) {
                 return;
+            }
+
+            const card = document.getElementById(`watchlist-card-${cryptoId}`);
+            if (card) {
+                card.style.opacity = '0.5';
+                card.style.pointerEvents = 'none';
             }
 
             try {
@@ -140,10 +293,30 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    loadWatchlist();
+                    // Remove immediately from UI
+                    if (card) {
+                        card.remove();
+                    }
+                    delete previousWatchlistPrices[cryptoId];
+                    
+                    // Check if watchlist is empty
+                    const grid = document.getElementById('watchlistGrid');
+                    const remainingCards = grid.querySelectorAll('.crypto-card');
+                    if (remainingCards.length === 0) {
+                        grid.innerHTML = '<p class="empty-state">Your watchlist is empty. Add some cryptocurrencies to track!</p>';
+                    }
+                } else {
+                    if (card) {
+                        card.style.opacity = '1';
+                        card.style.pointerEvents = 'auto';
+                    }
                 }
             } catch (error) {
                 console.error('Error removing from watchlist:', error);
+                if (card) {
+                    card.style.opacity = '1';
+                    card.style.pointerEvents = 'auto';
+                }
             }
         }
 
@@ -152,98 +325,48 @@
             try {
                 const response = await fetch('/api/watchlist');
                 const data = await response.json();
+                console.log('📊 Watchlist data received:', data);
                 displayWatchlist(data);
             } catch (error) {
                 console.error('Error loading watchlist:', error);
-                document.getElementById('watchlistGrid').innerHTML = '<p class="error">Error loading watchlist</p>';
             }
         }
-
-        // Store previous prices for animation
-        let previousWatchlistPrices = {};
 
         function displayWatchlist(data) {
             const grid = document.getElementById('watchlistGrid');
 
-            if (Object.keys(data).length === 0) {
-                grid.innerHTML = '<p class="empty-state">Your watchlist is empty. Add some cryptocurrencies to track!</p>';
+            // Remove loading message
+            const loading = grid.querySelector('.loading');
+            if (loading) {
+                loading.remove();
+            }
+
+            // Check if data is empty
+            if (!data || typeof data !== 'object' || Object.keys(data).length === 0) {
+                const existingCards = grid.querySelectorAll('.crypto-card');
+                if (existingCards.length === 0) {
+                    grid.innerHTML = '<p class="empty-state">Your watchlist is empty. Add some cryptocurrencies to track!</p>';
+                }
                 return;
             }
 
-            const cryptoNames = {
-                'bitcoin': 'Bitcoin (BTC)',
-                'ethereum': 'Ethereum (ETH)',
-                'cardano': 'Cardano (ADA)',
-                'solana': 'Solana (SOL)',
-                'dogecoin': 'Dogecoin (DOGE)',
-                'ripple': 'Ripple (XRP)',
-                'polkadot': 'Polkadot (DOT)',
-                'binancecoin': 'Binance Coin (BNB)'
-            };
+            // Remove empty state
+            const emptyState = grid.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
+            }
 
-            const cryptoIcons = {
-                'bitcoin': '₿',
-                'ethereum': 'Ξ',
-                'cardano': '₳',
-                'solana': '◎',
-                'dogecoin': 'Ð',
-                'ripple': 'X',
-                'polkadot': '●',
-                'binancecoin': 'B'
-            };
-
-            // If grid is empty or has loading state, create initial cards
-            if (grid.querySelector('.empty-state') || grid.querySelector('.loading')) {
-                grid.innerHTML = '';
-                for (const [crypto, info] of Object.entries(data)) {
-                    const change24h = info.usd_24h_change || 0;
-                    const changeClass = change24h >= 0 ? 'positive' : 'negative';
-                    const changeSymbol = change24h >= 0 ? '▲' : '▼';
-
-                    const card = document.createElement('div');
-                    card.className = 'crypto-card';
-                    card.id = `watchlist-card-${crypto}`;
-                    card.innerHTML = `
-                        <button class="remove-btn" onclick="removeFromWatchlist('${crypto}')" title="Remove from watchlist">×</button>
-                        <div class="crypto-icon">${cryptoIcons[crypto] || '🪙'}</div>
-                        <h3>${cryptoNames[crypto] || crypto}</h3>
-                        <div class="price" data-crypto="${crypto}">${info.usd.toLocaleString()}</div>
-                        <div class="change ${changeClass}">
-                            ${changeSymbol} ${Math.abs(change24h).toFixed(2)}%
-                        </div>
-                        <div class="market-cap">
-                            Market Cap: ${(info.usd_market_cap / 1e9).toFixed(2)}B
-                        </div>
-                    `;
-                    grid.appendChild(card);
-                    previousWatchlistPrices[crypto] = info.usd;
-                }
-            } else {
-                // Update existing cards with animation
-                for (const [crypto, info] of Object.entries(data)) {
-                    const priceElement = document.querySelector(`#watchlist-card-${crypto} .price[data-crypto="${crypto}"]`);
-                    const card = document.getElementById(`watchlist-card-${crypto}`);
-                    
-                    if (priceElement && card && previousWatchlistPrices[crypto] !== undefined) {
-                        const oldPrice = previousWatchlistPrices[crypto];
-                        const newPrice = info.usd;
-                        
-                        if (oldPrice !== newPrice) {
-                            // Add flash animation
-                            const flashClass = newPrice > oldPrice ? 'price-up' : 'price-down';
-                            card.classList.add(flashClass);
-                            
-                            // Update price with animation
-                            priceElement.textContent = `${newPrice.toLocaleString()}`;
-                            
-                            // Remove animation class after animation completes
-                            setTimeout(() => {
-                                card.classList.remove(flashClass);
-                            }, 1000);
-                        }
-                        
-                        previousWatchlistPrices[crypto] = newPrice;
-                    }
+            // For each crypto in data, either create or update
+            for (const [crypto, info] of Object.entries(data)) {
+                const cardExists = document.getElementById(`watchlist-card-${crypto}`);
+                
+                if (cardExists) {
+                    // Card exists, just update it
+                    updateCryptoCard(crypto, info);
+                } else {
+                    // Card doesn't exist, create it
+                    console.log(`Creating card for ${crypto} from loadWatchlist`);
+                    createCryptoCard(crypto, info, grid);
                 }
             }
         }
@@ -262,6 +385,10 @@
             if (!crypto || !threshold) {
                 messageDiv.className = 'message error';
                 messageDiv.textContent = 'Please fill all fields';
+                setTimeout(() => {
+                    messageDiv.textContent = '';
+                    messageDiv.className = 'message';
+                }, 3000);
                 return;
             }
 
@@ -281,12 +408,17 @@
                     document.getElementById('alertThreshold').value = '';
                     setTimeout(() => {
                         messageDiv.textContent = '';
+                        messageDiv.className = 'message';
                         loadAlerts();
                     }, 2000);
                 }
             } catch (error) {
                 messageDiv.className = 'message error';
                 messageDiv.textContent = 'Error creating alert';
+                setTimeout(() => {
+                    messageDiv.textContent = '';
+                    messageDiv.className = 'message';
+                }, 3000);
             }
         }
 
@@ -310,7 +442,7 @@
 
             list.innerHTML = alerts.map(alert => `
                 <div class="alert-item">
-                    <span>${alert.crypto_id.toUpperCase()} ${alert.condition} ${alert.threshold.toLocaleString()}</span>
+                    <span>${alert.crypto_id.toUpperCase()} ${alert.condition} $${parseFloat(alert.threshold).toLocaleString()}</span>
                     <button onclick="deleteAlert(${alert.id})" class="delete-alert-btn">Delete</button>
                 </div>
             `).join('');
@@ -342,7 +474,6 @@
                         </div>
                     `).join('');
                     
-                    // Auto-hide after 5 seconds
                     setTimeout(() => {
                         container.innerHTML = '';
                     }, 5000);
@@ -352,9 +483,7 @@
             }
         }
 
-        // Load alerts on page load
         loadAlerts();
-        // Check for triggered alerts every 15 seconds
         setInterval(checkAlerts, 15000);
     </script>
 </body>

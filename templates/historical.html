@@ -40,6 +40,9 @@
                     <option value="cardano">Cardano (ADA)</option>
                     <option value="solana">Solana (SOL)</option>
                     <option value="dogecoin">Dogecoin (DOGE)</option>
+                    <option value="ripple">Ripple (XRP)</option>
+                    <option value="polkadot">Polkadot (DOT)</option>
+                    <option value="binancecoin">Binance Coin (BNB)</option>
                 </select>
             </div>
 
@@ -66,70 +69,165 @@
 
     <script>
         let priceChart = null;
+        let isLoading = false;
+        let lastRequestTime = 0;
+        const MIN_REQUEST_INTERVAL = 3000; // 3 seconds between requests
 
         async function loadHistoricalData() {
+            // Check if enough time has passed since last request
+            const now = Date.now();
+            const timeSinceLastRequest = now - lastRequestTime;
+            
+            if (timeSinceLastRequest < MIN_REQUEST_INTERVAL && lastRequestTime > 0) {
+                const waitTime = Math.ceil((MIN_REQUEST_INTERVAL - timeSinceLastRequest) / 1000);
+                showCooldownMessage(waitTime);
+                return;
+            }
+
+            // Prevent multiple simultaneous loads
+            if (isLoading) return;
+            isLoading = true;
+            lastRequestTime = now;
+
             const crypto = document.getElementById('cryptoSelector').value;
             const days = document.getElementById('timeRange').value;
+            
+            const chartContainer = document.querySelector('.chart-container');
+            const statsGrid = document.getElementById('statsGrid');
+            
+            // Show immediate loading feedback
+            chartContainer.style.opacity = '0.5';
+            statsGrid.style.opacity = '0.5';
+            statsGrid.innerHTML = '<div style="text-align: center; padding: 40px; color: #667eea; font-size: 18px;">📊 Loading data...</div>';
+
+            // Destroy existing chart immediately for faster perceived response
+            if (priceChart) {
+                priceChart.destroy();
+                priceChart = null;
+            }
 
             try {
+                console.log(`Fetching data for ${crypto}, ${days} days`);
                 const response = await fetch(`/api/historical?crypto=${crypto}&days=${days}`);
-                const data = await response.json();
                 
-                if (data.prices && data.prices.length > 0) {
+                if (!response.ok) {
+                    if (response.status === 429) {
+                        throw new Error('Rate limit reached. Please wait 10 seconds before trying again.');
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('API Response:', data);
+                
+                if (data && data.prices && data.prices.length > 0) {
                     displayChart(data, crypto);
                     displayStats(data, crypto);
+                } else if (data && data.error) {
+                    statsGrid.innerHTML = `<div style="text-align: center; padding: 40px; color: #ef4444;">⚠️ ${data.error}<br><small>Please wait a few seconds and try again.</small></div>`;
                 } else {
-                    console.error('No data received');
+                    statsGrid.innerHTML = '<div style="text-align: center; padding: 40px; color: #ef4444;">⚠️ No data available. Please try again.</div>';
                 }
             } catch (error) {
                 console.error('Error loading historical data:', error);
+                statsGrid.innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: #ef4444;">
+                        ⚠️ ${error.message}
+                        <br><small>CoinGecko API has rate limits. Please wait at least <strong>3 seconds</strong> between requests.</small>
+                    </div>`;
+            } finally {
+                chartContainer.style.opacity = '1';
+                statsGrid.style.opacity = '1';
+                isLoading = false;
             }
+        }
+
+        function showCooldownMessage(secondsLeft) {
+            const statsGrid = document.getElementById('statsGrid');
+            statsGrid.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #f59e0b; font-size: 18px;">
+                    ⏳ Please wait ${secondsLeft} second${secondsLeft > 1 ? 's' : ''} before making another request
+                    <br><small style="color: #9ca3af; margin-top: 10px; display: block;">API rate limit protection</small>
+                </div>`;
         }
 
         function displayChart(data, crypto) {
             const ctx = document.getElementById('priceChart').getContext('2d');
             
-            // Extract timestamps and prices
-            const labels = data.prices.map(point => {
+            let prices = data.prices;
+            const maxPoints = 100;
+            if (prices.length > maxPoints) {
+                const step = Math.floor(prices.length / maxPoints);
+                prices = prices.filter((_, index) => index % step === 0);
+            }
+            
+            const labels = prices.map(point => {
                 const date = new Date(point[0]);
-                return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                const days = document.getElementById('timeRange').value;
+                
+                if (days == 1) {
+                    return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                } else {
+                    return date.toLocaleDateString([], {month: 'short', day: 'numeric'});
+                }
             });
             
-            const prices = data.prices.map(point => point[1]);
+            const priceData = prices.map(point => point[1]);
 
-            // Destroy existing chart if it exists
-            if (priceChart) {
-                priceChart.destroy();
-            }
+            // Determine color based on trend
+            const firstPrice = priceData[0];
+            const lastPrice = priceData[priceData.length - 1];
+            const isPositive = lastPrice >= firstPrice;
+            const lineColor = isPositive ? '#10b981' : '#ef4444';
+            const bgColor = isPositive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)';
 
-            // Create new chart
             priceChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: labels,
                     datasets: [{
                         label: `${crypto.toUpperCase()} Price (USD)`,
-                        data: prices,
-                        borderColor: '#667eea',
-                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                        borderWidth: 2,
+                        data: priceData,
+                        borderColor: lineColor,
+                        backgroundColor: bgColor,
+                        borderWidth: 3,
                         fill: true,
                         tension: 0.4,
-                        pointRadius: 2,
-                        pointHoverRadius: 5
+                        pointRadius: 0,
+                        pointHoverRadius: 6,
+                        pointHoverBackgroundColor: lineColor,
+                        pointHoverBorderColor: '#fff',
+                        pointHoverBorderWidth: 2
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: {
+                        duration: 500
+                    },
                     plugins: {
                         legend: {
                             display: true,
-                            position: 'top'
+                            position: 'top',
+                            labels: {
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                }
+                            }
                         },
                         tooltip: {
                             mode: 'index',
                             intersect: false,
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            padding: 12,
+                            titleFont: {
+                                size: 14
+                            },
+                            bodyFont: {
+                                size: 13
+                            },
                             callbacks: {
                                 label: function(context) {
                                     return '$' + context.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -140,17 +238,29 @@
                     scales: {
                         x: {
                             display: true,
+                            grid: {
+                                display: false
+                            },
                             ticks: {
                                 maxRotation: 45,
                                 minRotation: 45,
-                                maxTicksLimit: 10
+                                maxTicksLimit: 8,
+                                font: {
+                                    size: 11
+                                }
                             }
                         },
                         y: {
                             display: true,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            },
                             ticks: {
                                 callback: function(value) {
                                     return '$' + value.toLocaleString();
+                                },
+                                font: {
+                                    size: 11
                                 }
                             }
                         }
@@ -175,39 +285,50 @@
             const priceChange = currentPrice - startPrice;
             const priceChangePercent = ((priceChange / startPrice) * 100).toFixed(2);
 
+            const cryptoNames = {
+                'bitcoin': '₿',
+                'ethereum': 'Ξ',
+                'cardano': '₳',
+                'solana': '◎',
+                'dogecoin': 'Ð',
+                'ripple': 'X',
+                'polkadot': '●',
+                'binancecoin': 'B'
+            };
+
             const statsGrid = document.getElementById('statsGrid');
             statsGrid.innerHTML = `
                 <div class="stat-card">
-                    <div class="stat-label">Current Price</div>
+                    <div class="stat-label">${cryptoNames[crypto] || '🪙'} Current Price</div>
                     <div class="stat-value">$${currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Price Change</div>
+                    <div class="stat-label">📈 Price Change</div>
                     <div class="stat-value ${priceChange >= 0 ? 'positive' : 'negative'}">
-                        ${priceChange >= 0 ? '+' : ''}$${priceChange.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        ${priceChange >= 0 ? '▲ +' : '▼ '}$${Math.abs(priceChange).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                         (${priceChangePercent}%)
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Highest Price</div>
+                    <div class="stat-label">🔝 Highest Price</div>
                     <div class="stat-value">$${highPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Lowest Price</div>
+                    <div class="stat-label">📉 Lowest Price</div>
                     <div class="stat-value">$${lowPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Average Price</div>
+                    <div class="stat-label">📊 Average Price</div>
                     <div class="stat-value">$${avgPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Volatility</div>
+                    <div class="stat-label">⚡ Volatility</div>
                     <div class="stat-value">${((highPrice - lowPrice) / avgPrice * 100).toFixed(2)}%</div>
                 </div>
             `;
         }
 
-        // Load default data on page load
+        // Load initial data
         loadHistoricalData();
     </script>
 </body>
